@@ -1,0 +1,151 @@
+
+//groovy script
+// (jenkins_url)/env-vars.html/
+CODE_CHANGES = GetGitChanges()
+def gv
+pipeline {
+    agent any //This is more relevant when you have a jenkins cluster.
+    parameters {
+        // Types of Parameter:
+        // string (name, defaultValue, description)
+        // choice (name, choices, description)
+        // either of the above can be used with booleanParam
+        string(name: 'VERSION', defaultValue: '', description: 'version to deploy on prod')
+        choice(name: 'VERSION', choices: ['1.1.0', '1.2.0', '1.3.0'], description: '')
+        booleanParam(name: 'executeTests', defaultValue: 'true', description: '')
+    }
+    tools { // Provides you access to build tools for ypur project e.g Maven, Gradle, jdk.
+        maven 'Maven' //This definition will make maven command available in all stages
+    }
+    environment {
+        NEW_VERSION = '1.3.0'
+        SERVER_CREDENTIALS = credentials('server-credentials') // This method or function binds credentials to your env variable
+    }
+
+    stages {   // This is where the work actually happen
+
+        stage('init') {
+            // Using external groovy script in Jenkinsfile
+            steps {
+                script {
+                    gv = load "script.groovy" // gv is the variable that holds the imported groovy script
+                                              // It should be made globally available so as to be able to use it in all statges.
+                }
+            }
+        }
+
+         stage ('checkout') {
+            steps {
+                sh 'git checkout dev'
+            }
+
+        }
+        stage ('Hello') {
+            steps {
+                echo 'Hello World'
+            }
+
+        }
+
+         stage ('build') {
+             when {
+                 expression {
+                     BRANCH_NAME == 'dev' && CODE_CHANGES == true
+                     echo "building version ${NEW_VERSION}"
+                 }
+             }
+            steps {
+                // Using external groovy scripts
+                script {
+                    gv.buildApp() // buildApp() is the function declare in the external groovy script
+                    // variableName.functionName
+                }
+                // This will be used if there was no external script
+                echo 'building the application'
+                sh 'npm install'
+                sh 'npm build'
+            }
+
+        }
+
+         stage ('test') {
+             when {
+                 expression {
+                     params.executeTests // This stage will execute if params.executeTests is set to true
+                     BRANCH_NAME == 'dev' || BRANCH_NAME == 'master'
+                     // or like this env.BRANCH_NAME
+                 }
+             }
+            steps {
+
+                gv.testApp() {
+                    echo 'testing the application...'
+                }
+
+                // This can be used if there was no external groovy script
+                echo 'testing the application'
+                echo 'Hello World'
+            }
+
+        }
+
+         stage ('deploy'){
+
+                //input parameter
+            input {
+                message "Select the environment to deploy to"
+                ok "Done"
+                parameters {
+                    choice(name: 'ENV', choices: ['dev', 'staging', 'prod'], description: '')
+                    // for multi input parameter
+                    choice(name: 'ONE', choices: ['dev', 'staging', 'prod'], description: '')
+                    choice(name: 'TWO', choices: ['dev', 'staging', 'prod'], description: '')
+                }
+            }
+            steps {
+                echo 'deploying the application'
+                echo "deploying with ${SERVER_CREDENTIALS}"
+                sh "${SERVER_CREDENTIALS}"
+                echo "deploying version ${params.VERSION}"
+                // Or you use it directly in the stage/scope
+                withCredentials([
+                    usernamePassword(credentials: 'server-credentials', usernameVariable: USER, passwordVariable: PWD)
+                ]) 
+                    sh "some script ${USER} ${PWD}"
+                
+                    gv.deployApp() {
+                    echo 'deploying the application...'
+                    echo "deploying version ${VERSION}"
+                    echo "Deploying to ${ENV}"
+                    echo "Deploying to ${ONE}"
+                    echo "Deploying to ${TWO}"
+                    }
+// Use input directly in your script and assigning it to a variable esp. if you have one input and you are going to use that variable in other stages.
+            steps {
+                script {
+                    env.ENV = input message: "Select the environment to deploy to", ok: "Done", parameters: [choice(name: 'ONE',
+                    choices: ['dev', 'staging', 'prod'], description: '')]
+                }
+            }
+            }
+
+        }
+    }
+
+    post {
+        always {
+            // send an email 
+        }
+
+        success {
+            // send a notification to slack
+        }
+
+        failure {
+            // trigger an code red
+        }
+    }
+}
+
+
+
